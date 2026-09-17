@@ -25,6 +25,7 @@
                 <Slider>slider_volume.png</Slider>
                 <Pos>73,55</Pos>
                 <Horizontal>false</Horizontal>
+                <ClickToPosition>true</ClickToPosition>
                 <Connection>
                   <ConfigKey>[Channel1],volume</ConfigKey>
                   <EmitOnDownPress>false</EmitOnDownPress>
@@ -36,6 +37,7 @@
                 <Slider>slider_volume.png</Slider>
                 <Pos>168,55</Pos>
                 <Horizontal>false</Horizontal>
+                <ClickToPosition>true</ClickToPosition>
                 <Connection>
                   <ConfigKey>[Channel2],volume</ConfigKey>
                   <EmitOnDownPress>false</EmitOnDownPress>

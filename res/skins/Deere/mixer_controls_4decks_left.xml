@@ -185,6 +185,7 @@
                     <Slider scalemode="STRETCH">slider-vertical.svg</Slider>
                     <Handle scalemode="STRETCH_ASPECT">handle-volume-deck<Variable name="i"/>.svg</Handle>
                     <Horizontal>false</Horizontal>
+                    <ClickToPosition>true</ClickToPosition>
                     <Connection>
                       <ConfigKey><Variable name="group"/>,volume</ConfigKey>
                       <EmitOnDownPress>false</EmitOnDownPress>
@@ -252,6 +253,7 @@
                     <Slider scalemode="STRETCH">slider-vertical.svg</Slider>
                     <Handle scalemode="STRETCH_ASPECT">handle-volume-deck<Variable name="i"/>.svg</Handle>
                     <Horizontal>false</Horizontal>
+                    <ClickToPosition>true</ClickToPosition>
                     <Connection>
                       <ConfigKey><Variable name="group"/>,volume</ConfigKey>
                       <EmitOnDownPress>false</EmitOnDownPress>

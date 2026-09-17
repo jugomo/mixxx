@@ -119,6 +119,7 @@
             <BarMargins><Variable name="BarMarginVolume"/></BarMargins>
             <BarRoundCaps>true</BarRoundCaps>
             <BarAxisPos>21.0</BarAxisPos>
+            <ClickToPosition>true</ClickToPosition>
             <Connection>
               <ConfigKey><Variable name="Group"/>,volume</ConfigKey>
             </Connection>
