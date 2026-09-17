@@ -128,6 +128,25 @@ void WWaveformViewer::mousePressEvent(QMouseEvent* event) {
                 m_pCueMenuPopup->popup(event->globalPos());
 #endif
             }
+        } else if (WaveformWidgetFactory::instance()->isLeftClickPitchBendEnabled()) {
+            // Left-click is pitch-bending, so right-click takes over the
+            // scratch/scrub behavior that left-click normally provides.
+            if (m_bBending) {
+                m_pWheel->setParameter(0.5);
+                m_bBending = false;
+            }
+            m_bScratching = true;
+            int eventPosValue = m_waveformWidget->getOrientation() == Qt::Horizontal ?
+                        event->pos().x() : event->pos().y();
+            double audioSamplePerPixel = m_waveformWidget->getAudioSamplePerPixel();
+            // See left-click handling above for why this flips in reversed mode.
+            double dragDirection =
+                    WaveformWidgetFactory::instance()->isReverseWaveformDirection()
+                    ? 1.0
+                    : -1.0;
+            double targetPosition = dragDirection * eventPosValue * audioSamplePerPixel * 2;
+            m_pScratchPosition->set(targetPosition);
+            m_pScratchPositionEnable->set(1.0);
         } else {
             // If we are scratching then disable and reset because the two shouldn't
             // be used at once.
