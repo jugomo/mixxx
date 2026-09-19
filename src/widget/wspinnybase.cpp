@@ -3,6 +3,8 @@
 #include <QApplication>
 #include <QtDebug>
 
+#include <algorithm>
+
 #include "control/controlproxy.h"
 #include "library/coverartcache.h"
 #include "library/coverartutils.h"
@@ -14,9 +16,11 @@
 #include "track/track.h"
 #include "util/dnd.h"
 #include "util/fpclassify.h"
+#include "util/math.h"
 #include "vinylcontrol/vinylcontrolmanager.h"
 #include "waveform/visualplayposition.h"
 #include "waveform/vsyncthread.h"
+#include "waveform/waveformwidgetfactory.h"
 #include "wimagestore.h"
 
 // The SampleBuffers format enables antialiasing.
@@ -36,6 +40,7 @@ WSpinnyBase::WSpinnyBase(
           m_pTrackSampleRate(PollingControlProxy(m_group, QStringLiteral("track_samplerate"))),
           m_pScratchToggle(PollingControlProxy(m_group, QStringLiteral("scratch_position_enable"))),
           m_pScratchPos(PollingControlProxy(m_group, QStringLiteral("scratch_position"))),
+          m_pWheel(PollingControlProxy(m_group, QStringLiteral("wheel"))),
           m_pVinylControlSpeedType(nullptr),
           m_pVinylControlEnabled(nullptr),
           m_pSignalEnabled(nullptr),
@@ -58,6 +63,10 @@ WSpinnyBase::WSpinnyBase(
           m_iStartMouseY(-1),
           m_iFullRotations(0),
           m_dPrevTheta(0.),
+          m_bScratching(false),
+          m_bBending(false),
+          m_dBendAnchorTheta(0.),
+          m_bIgnoreDoubleClick(false),
           m_dRotationsPerSecond(MIXXX_VINYL_SPEED_33_NUM / 60),
           m_bClampFailedWarning(false),
           m_bGhostPlayback(false),
@@ -527,11 +536,19 @@ void WSpinnyBase::mouseMoveEvent(QMouseEvent* e) {
     // qDebug() << "c t:" << theta << "pt:" << m_dPrevTheta <<
     //             "icr" << m_iFullRotations;
 
-    if ((e->buttons() & Qt::LeftButton) || (e->buttons() & Qt::RightButton)) {
+    if (m_bScratching) {
         // Convert deltaTheta into a percentage of song length.
         double absPos = calculatePositionFromAngle(theta);
         double absPosInSamples = absPos * m_pTrackSamples.get();
         m_pScratchPos.set(absPosInSamples - m_dInitialPos);
+    } else if (m_bBending) {
+        // Treat the arc length travelled along the rim as the pixel distance
+        // so the sensitivity setting in Preferences > Decks applies the same
+        // way as on the waveform. Clockwise speeds the track up.
+        double radius = std::min(width(), height()) / 2.0;
+        double arc = (theta - m_dBendAnchorTheta) * (M_PI / 180.0) * radius;
+        double v = 0.5 + arc / WaveformWidgetFactory::instance()->getPitchBendDivisor();
+        m_pWheel.setParameter(math_clamp(v, 0.0, 1.0));
     } else if (e->buttons() & Qt::MiddleButton) {
     } else if (e->buttons() & Qt::NoButton) {
         setCursor(QCursor(Qt::OpenHandCursor));
@@ -543,62 +560,109 @@ void WSpinnyBase::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
+    m_bIgnoreDoubleClick = false;
+
     if (m_pDlgCoverArt->isVisible()) {
         m_pDlgCoverArt->close();
+        m_bIgnoreDoubleClick = true;
         return;
     }
 
     if (m_pCoverMenu->isVisible()) {
         m_pCoverMenu->close();
+        m_bIgnoreDoubleClick = true;
         return;
     }
 
-    if (e->button() == Qt::LeftButton) {
+    if (e->button() != Qt::LeftButton && e->button() != Qt::RightButton) {
+        return;
+    }
+
+    // Same mapping as on the waveform: by default left-click drags the vinyl
+    // and right-click pitch-bends, and the "Pitch bend on left-click-drag"
+    // setting swaps the two.
+    const bool leftPitchBend = WaveformWidgetFactory::instance()->isLeftClickPitchBendEnabled();
+    const bool bend = (e->button() == Qt::LeftButton) == leftPitchBend;
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        int y = static_cast<int>(e->position().y());
-        int x = static_cast<int>(e->position().x());
+    int y = static_cast<int>(e->position().y());
+    int x = static_cast<int>(e->position().x());
 #else
-        int y = e->y();
-        int x = e->x();
+    int y = e->y();
+    int x = e->x();
 #endif
 
-        m_iStartMouseX = x;
-        m_iStartMouseY = y;
+    m_iStartMouseX = x;
+    m_iStartMouseY = y;
 
-        QApplication::setOverrideCursor(QCursor(Qt::ClosedHandCursor));
+    QApplication::setOverrideCursor(QCursor(Qt::ClosedHandCursor));
 
-        // Coordinates from center of widget
-        double c_x = x - width() / 2;
-        double c_y = y - height() / 2;
-        double theta = (180.0 / M_PI) * atan2(c_x, -c_y);
-        m_dPrevTheta = theta;
+    // Coordinates from center of widget
+    double c_x = x - width() / 2;
+    double c_y = y - height() / 2;
+    double theta = (180.0 / M_PI) * atan2(c_x, -c_y);
+    m_dPrevTheta = theta;
+
+    if (bend) {
+        // The two gestures shouldn't be used at once.
+        if (m_bScratching) {
+            m_pScratchToggle.set(0.0);
+            m_bScratching = false;
+            QApplication::restoreOverrideCursor();
+        }
+        m_iFullRotations = 0;
+        m_dBendAnchorTheta = theta;
+        m_pWheel.setParameter(0.5);
+        m_bBending = true;
+    } else {
+        if (m_bBending) {
+            m_pWheel.setParameter(0.5);
+            m_bBending = false;
+            QApplication::restoreOverrideCursor();
+        }
         m_iFullRotations = calculateFullRotations(m_pPlayPos.get());
         theta += m_iFullRotations * 360.0;
         m_dInitialPos = calculatePositionFromAngle(theta) * m_pTrackSamples.get();
 
         m_pScratchPos.set(0);
         m_pScratchToggle.set(1.0);
+        m_bScratching = true;
 
         // Trigger a mouse move to immediately line up the vinyl with the cursor
         mouseMoveEvent(e);
-    } else {
-        if (!m_loadedCover.isNull()) {
-            m_pDlgCoverArt->init(m_pLoadedTrack);
-        } else if (!m_pDlgCoverArt->isVisible() && m_bShowCover) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-            m_pCoverMenu->popup(e->globalPosition().toPoint());
-#else
-            m_pCoverMenu->popup(e->globalPos());
-#endif
-        }
     }
 }
 
 void WSpinnyBase::mouseReleaseEvent(QMouseEvent* e) {
-    if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton) {
-        QApplication::restoreOverrideCursor();
+    if (e->button() != Qt::LeftButton && e->button() != Qt::RightButton) {
+        return;
+    }
+    if (m_bScratching) {
         m_pScratchToggle.set(0.0);
-        m_iFullRotations = 0;
+        m_bScratching = false;
+        QApplication::restoreOverrideCursor();
+    }
+    if (m_bBending) {
+        m_pWheel.setParameter(0.5);
+        m_bBending = false;
+        QApplication::restoreOverrideCursor();
+    }
+    m_iFullRotations = 0;
+}
+
+void WSpinnyBase::mouseDoubleClickEvent(QMouseEvent* e) {
+    if (m_pLoadedTrack == nullptr || m_bIgnoreDoubleClick) {
+        return;
+    }
+
+    if (!m_loadedCover.isNull()) {
+        m_pDlgCoverArt->init(m_pLoadedTrack);
+    } else if (!m_pDlgCoverArt->isVisible() && m_bShowCover) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        m_pCoverMenu->popup(e->globalPosition().toPoint());
+#else
+        m_pCoverMenu->popup(e->globalPos());
+#endif
     }
 }
 

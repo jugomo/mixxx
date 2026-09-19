@@ -74,6 +74,7 @@ class WSpinnyBase : public WGLWidget,
     void mouseMoveEvent(QMouseEvent* e) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
+    void mouseDoubleClickEvent(QMouseEvent* e) override;
     void resizeEvent(QResizeEvent* /*unused*/) override;
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
@@ -115,6 +116,7 @@ class WSpinnyBase : public WGLWidget,
     PollingControlProxy m_pTrackSampleRate;
     PollingControlProxy m_pScratchToggle;
     PollingControlProxy m_pScratchPos;
+    PollingControlProxy m_pWheel;
     parented_ptr<ControlProxy> m_pVinylControlSpeedType;
     parented_ptr<ControlProxy> m_pVinylControlEnabled;
     parented_ptr<ControlProxy> m_pSignalEnabled;
@@ -146,6 +148,16 @@ class WSpinnyBase : public WGLWidget,
     int m_iStartMouseY;
     int m_iFullRotations;
     double m_dPrevTheta;
+    // Which drag gesture (if any) is currently active. Which mouse button
+    // triggers which one depends on the "Pitch bend on left-click-drag"
+    // setting, see WaveformWidgetFactory::isLeftClickPitchBendEnabled().
+    bool m_bScratching;
+    bool m_bBending;
+    // Unwrapped angle (degrees) at which the current pitch bend drag started.
+    double m_dBendAnchorTheta;
+    // Set when a mouse press closed the cover art dialog/menu, so the
+    // double-click event that may follow doesn't immediately reopen it.
+    bool m_bIgnoreDoubleClick;
     // Speed of the vinyl rotation.
     double m_dRotationsPerSecond;
     bool m_bClampFailedWarning;
