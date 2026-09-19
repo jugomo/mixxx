@@ -35,6 +35,10 @@ const QString kLegacyGroup = QStringLiteral("[Master]");
 const QString kMainGroup = QStringLiteral("[Main]");
 
 const ConfigKey kInternalClockBpmKey{QStringLiteral("[InternalClock]"), QStringLiteral("bpm")};
+
+// Crossfader values for presets 1-9: 100/80/40/20% left, center, 20/40/80/100% right.
+constexpr std::array<double, kNumCrossfaderPositions> kCrossfaderPositionValues = {
+        -1.0, -0.8, -0.4, -0.2, 0.0, 0.2, 0.4, 0.8, 1.0};
 } // namespace
 
 EngineMixer::EngineMixer(UserSettingsPointer pConfig,
@@ -102,18 +106,8 @@ EngineMixer::EngineMixer(UserSettingsPointer pConfig,
                           : nullptr),
           m_pCrossfader(std::make_unique<ControlPotmeter>(
                   ConfigKey(group, "crossfader"), -1., 1.)),
-          m_pCrossfaderHold(std::make_unique<ControlPushButton>(
-                  ConfigKey(group, "crossfader_hold"))),
-          m_pCrossfaderHoldValue(std::make_unique<ControlPotmeter>(
-                  ConfigKey(group, "crossfader_hold_value"),
-                  -1.,
-                  1.,
-                  false,
-                  true,
-                  false,
-                  /*bPersist=*/true,
-                  /*defaultValue=*/-1.0)),
-          m_bCrossfaderHoldWasActive(false),
+          m_activeCrossfaderHoldIndex(-1),
+          m_crossfaderPreHoldValue(0.0),
           m_pHeadMix(std::make_unique<ControlPotmeter>(
                   ConfigKey(group, "headMix"), -1., 1.)),
           m_pBalance(std::make_unique<ControlPotmeter>(
@@ -213,6 +207,16 @@ EngineMixer::EngineMixer(UserSettingsPointer pConfig,
     m_sidechainMix.clear();
     for (auto& buffer : m_outputBusBuffers) {
         buffer.clear();
+    }
+
+    // Crossfader position presets
+    for (int i = 0; i < kNumCrossfaderPositions; ++i) {
+        m_pCrossfaderPosition[i] = std::make_unique<ControlPushButton>(
+                ConfigKey(group, QStringLiteral("crossfader_position_%1").arg(i + 1)));
+        m_pCrossfaderPositionHold[i] = std::make_unique<ControlPushButton>(
+                ConfigKey(group, QStringLiteral("crossfader_position_%1_hold").arg(i + 1)));
+        m_bCrossfaderPositionWasActive[i] = false;
+        m_bCrossfaderPositionHoldWasActive[i] = false;
     }
 
     // X-Fader Setup
@@ -491,13 +495,46 @@ void EngineMixer::process(const std::size_t bufferSize) {
         break;
     }
 
-    // Momentarily override the crossfader while crossfader_hold is held,
-    // restoring center on release. Edge-triggered so we only touch the CO
-    // (and its connected UI widget) on press/release, not every buffer.
-    const bool crossfaderHoldActive = m_pCrossfaderHold->toBool();
-    if (crossfaderHoldActive != m_bCrossfaderHoldWasActive) {
-        m_pCrossfader->set(crossfaderHoldActive ? m_pCrossfaderHoldValue->get() : 0.0);
-        m_bCrossfaderHoldWasActive = crossfaderHoldActive;
+    // Crossfader position presets. Edge-triggered so we only touch the CO (and its
+    // connected UI widget) on press/release, not every buffer.
+    for (int i = 0; i < kNumCrossfaderPositions; ++i) {
+        // Plain preset: jump to the position and stay there.
+        const bool positionActive = m_pCrossfaderPosition[i]->toBool();
+        if (positionActive != m_bCrossfaderPositionWasActive[i]) {
+            m_bCrossfaderPositionWasActive[i] = positionActive;
+            if (positionActive) {
+                m_pCrossfader->set(kCrossfaderPositionValues[i]);
+            }
+        }
+
+        // Hold preset: jump to the position only while held, restoring the value the
+        // crossfader had before the (possibly multi-key) hold sequence started.
+        const bool holdActive = m_pCrossfaderPositionHold[i]->toBool();
+        if (holdActive != m_bCrossfaderPositionHoldWasActive[i]) {
+            m_bCrossfaderPositionHoldWasActive[i] = holdActive;
+            if (holdActive) {
+                if (m_activeCrossfaderHoldIndex == -1) {
+                    m_crossfaderPreHoldValue = m_pCrossfader->get();
+                }
+                m_activeCrossfaderHoldIndex = i;
+                m_pCrossfader->set(kCrossfaderPositionValues[i]);
+            } else if (m_activeCrossfaderHoldIndex == i) {
+                int otherHeldIndex = -1;
+                for (int j = 0; j < kNumCrossfaderPositions; ++j) {
+                    if (m_bCrossfaderPositionHoldWasActive[j]) {
+                        otherHeldIndex = j;
+                        break;
+                    }
+                }
+                if (otherHeldIndex != -1) {
+                    m_activeCrossfaderHoldIndex = otherHeldIndex;
+                    m_pCrossfader->set(kCrossfaderPositionValues[otherHeldIndex]);
+                } else {
+                    m_activeCrossfaderHoldIndex = -1;
+                    m_pCrossfader->set(m_crossfaderPreHoldValue);
+                }
+            }
+        }
     }
 
     // Calculate the crossfader gains for left and right side of the crossfader
