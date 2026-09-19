@@ -37,6 +37,9 @@ class EngineDelay;
 // engine. Prevents memory allocation in EngineMixer::addChannel.
 static constexpr int kPreallocatedChannels = 64;
 
+// Number of fixed crossfader position presets (see m_pCrossfaderPosition).
+static constexpr int kNumCrossfaderPositions = 9;
+
 class EngineMixer : public QObject, public AudioSource {
     Q_OBJECT
   public:
@@ -317,9 +320,22 @@ class EngineMixer : public QObject, public AudioSource {
     std::unique_ptr<EngineSideChain> m_pEngineSideChain;
 
     std::unique_ptr<ControlPotmeter> m_pCrossfader;
-    std::unique_ptr<ControlPushButton> m_pCrossfaderHold;
-    std::unique_ptr<ControlPotmeter> m_pCrossfaderHoldValue;
-    bool m_bCrossfaderHoldWasActive;
+
+    // Fixed crossfader position presets (100/80/40/20% left, center, 20/40/80/100% right).
+    // "Plain" buttons jump the crossfader to the preset and leave it there; "hold" buttons
+    // jump the crossfader to the preset only while held, restoring the previous value on
+    // release. Edge-triggered in process() so the crossfader CO (and its connected UI
+    // widget) is only touched on press/release, not every buffer.
+    std::array<std::unique_ptr<ControlPushButton>, kNumCrossfaderPositions> m_pCrossfaderPosition;
+    std::array<std::unique_ptr<ControlPushButton>, kNumCrossfaderPositions> m_pCrossfaderPositionHold;
+    std::array<bool, kNumCrossfaderPositions> m_bCrossfaderPositionWasActive;
+    std::array<bool, kNumCrossfaderPositions> m_bCrossfaderPositionHoldWasActive;
+    // Index into m_pCrossfaderPositionHold of the hold button currently in effect,
+    // or -1 if none is held.
+    int m_activeCrossfaderHoldIndex;
+    // Crossfader value to restore once no hold button is held anymore.
+    double m_crossfaderPreHoldValue;
+
     std::unique_ptr<ControlPotmeter> m_pHeadMix;
     std::unique_ptr<ControlPotmeter> m_pBalance;
     std::unique_ptr<ControlPushButton> m_pXFaderMode;
